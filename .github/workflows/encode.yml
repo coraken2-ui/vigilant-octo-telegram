@@ -49,10 +49,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Install FFmpeg & Python
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Fonts & Python Libs
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig
-          pip install pyrogram tgcrypto pyaes nest_asyncio
+          sudo apt-get update -qq && sudo apt-get install -y -qq fontconfig
+          pip install -q pyrogram tgcrypto pyaes nest_asyncio
 
       - name: Encode via Pyrogram Worker
         env:

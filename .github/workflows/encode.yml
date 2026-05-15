@@ -293,12 +293,14 @@ jobs:
                   await app.stop()
                   return
 
-              if mode == 'removeaudio':
+              if mode == 'rename':
+                  cmd += ['-c', 'copy']
+              elif mode == 'removeaudio':
                   track = settings.get('audio_track', 'all')
-                  if track == 'all': cmd += ['-c', 'copy', '-an', out_name]
-                  else: cmd += ['-map', '0', '-map', f'-0:a:{track}', '-c', 'copy', out_name]
+                  if track == 'all': cmd += ['-c', 'copy', '-an']
+                  else: cmd += ['-map', '0', '-map', f'-0:a:{track}', '-c', 'copy']
               elif mode == 'addaudio' and a_path:
-                  cmd += ['-i', a_path, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', out_name]
+                  cmd += ['-i', a_path, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac']
               else:
                   vf_chains = []
                   if res_val == "Original": res_val = settings.get("cpu_res", "original")
@@ -321,7 +323,6 @@ jobs:
                       x, y = get_wm_coords(wm_pos, is_text=True, custom_val=custom_pos)
                       vf_chains.append(f"drawtext=text='{settings['wm_text']}':fontsize={wm_size}:fontcolor=white:x={x}:y={y}")
 
-                  # 🟢 MUDASSIR FIX: GitHub Worker Watermark FPS Sync
                   if wm_type == 'image' and wm_path:
                       cmd.extend(['-i', wm_path])
                       x, y = get_wm_coords(wm_pos, is_text=False, custom_val=custom_pos)
@@ -345,7 +346,6 @@ jobs:
                       import shlex
                       cmd += shlex.split(settings['custom_args'])
                       if '-c:a' not in settings['custom_args']: cmd += ['-c:a', 'copy']
-                      cmd += [out_name]
                   else:
                       crf = str(settings.get("quality", "23"))
                       preset = settings.get("preset", "fast")
@@ -353,12 +353,17 @@ jobs:
                       cmd += ['-c:v', 'libx264', '-preset', preset, '-crf', crf]
                       if ac == 'copy': cmd += ['-c:a', 'copy']
                       else: cmd += ['-c:a', ac, '-b:a', settings.get('audio_bitrate', '128k')]
-                      
-                      # 🟢 MUDASSIR FIX: GitHub Worker Remove Softsubs logic
-                      if settings.get('remove_softsubs', False):
-                          cmd += ['-sn']
-                          
-                      cmd += [out_name]
+
+              if settings.get('remove_softsubs', False):
+                  cmd += ['-sn']
+              if settings.get('meta_clean', False):
+                  cmd += ['-map_metadata', '-1']
+              if settings.get('meta_title') and str(settings['meta_title']) != 'None':
+                  cmd += ['-metadata', f'title={settings["meta_title"]}']
+              if settings.get('meta_author') and str(settings['meta_author']) != 'None':
+                  cmd += ['-metadata', f'artist={settings["meta_author"]}']
+                  
+              cmd += [out_name]
               
               if msg_id: await app.edit_message_text(chat_id, msg_id, f"File name:- **{out_name}**\nEncoding :- [░░░░░░░░░░] 0.0%\nSpecs: {mode.upper()} | {res_val}{hidden_id}")
               

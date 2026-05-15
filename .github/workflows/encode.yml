@@ -42,6 +42,9 @@ on:
       wm_file_id:
         required: false
         type: string
+      thumb_file_id:
+        required: false
+        type: string
 
 
 jobs:
@@ -187,6 +190,7 @@ jobs:
               mode = "${{ inputs.mode }}"
               font_file_id = "${{ inputs.font_file_id }}"
               wm_file_id = "${{ inputs.wm_file_id }}"
+              thumb_file_id = "${{ inputs.thumb_file_id }}"
               
               settings = json.loads(os.environ.get('INPUT_SETTINGS', '{}'))
               out_name = settings.get("output", "output.mkv")
@@ -209,9 +213,26 @@ jobs:
               wm_path = None
               if wm_file_id and settings.get('wm_type') == 'image':
                   wm_path = await app.download_media(wm_file_id, file_name="wm.png")
+
+              # ── Thumbnail resolve ──────────────────────────
+              thumb_mode = settings.get('thumb_mode', 'none')
+              thumb_dl_path = None
+              if thumb_mode == 'custom' and thumb_file_id:
+                  thumb_dl_path = await app.download_media(thumb_file_id, file_name="thumb_custom.jpg")
+              # 'original' thumbnail is extracted after v_path is downloaded (below)
               
               v_msg = await app.get_messages(chat_id, v_id)
               v_path = await app.download_media(v_msg, file_name="input.mp4", progress=make_prog(app, chat_id, msg_id, "Downloading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
+
+              # Extract 'original' frame thumbnail now that v_path is available
+              if thumb_mode == 'original':
+                  try:
+                      subprocess.run(
+                          ['ffmpeg', '-y', '-i', v_path, '-ss', '00:00:01.000', '-vframes', '1', '-q:v', '2', 'thumb_orig.jpg'],
+                          capture_output=True
+                      )
+                      if os.path.exists('thumb_orig.jpg'): thumb_dl_path = 'thumb_orig.jpg'
+                  except Exception: pass
               
               s_path = None
               if s_id:
@@ -443,7 +464,7 @@ jobs:
 
               for attempt in range(3):
                   try:
-                      await app.send_document(chat_id, out_name, caption=f"✅ **{out_name}**", file_name=out_name, progress=make_prog(app, chat_id, msg_id, "Uploading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
+                      await app.send_document(chat_id, out_name, caption=f"✅ **{out_name}**", file_name=out_name, thumb=thumb_dl_path if thumb_dl_path and os.path.exists(thumb_dl_path) else None, progress=make_prog(app, chat_id, msg_id, "Uploading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
                       break
                   except Exception:
                       await asyncio.sleep(5)

@@ -219,12 +219,10 @@ jobs:
               thumb_dl_path = None
               if thumb_mode == 'custom' and thumb_file_id:
                   thumb_dl_path = await app.download_media(thumb_file_id, file_name="thumb_custom.jpg")
-              # 'original' thumbnail is extracted after v_path is downloaded (below)
               
               v_msg = await app.get_messages(chat_id, v_id)
               v_path = await app.download_media(v_msg, file_name="input.mp4", progress=make_prog(app, chat_id, msg_id, "Downloading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
 
-              # Extract 'original' frame thumbnail now that v_path is available
               if thumb_mode == 'original':
                   try:
                       subprocess.run(

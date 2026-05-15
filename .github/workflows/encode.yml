@@ -213,24 +213,13 @@ jobs:
               wm_path = None
               if wm_file_id and settings.get('wm_type') == 'image':
                   wm_path = await app.download_media(wm_file_id, file_name="wm.png")
-
-              # ── Thumbnail resolve ──────────────────────────
-              thumb_mode = settings.get('thumb_mode', 'none')
-              thumb_dl_path = None
-              if thumb_mode == 'custom' and thumb_file_id:
-                  thumb_dl_path = await app.download_media(thumb_file_id, file_name="thumb_custom.jpg")
+              
+              thumb_path = None
+              if thumb_file_id and settings.get('thumb_mode') == 'custom':
+                  thumb_path = await app.download_media(thumb_file_id, file_name="thumb.jpg")
               
               v_msg = await app.get_messages(chat_id, v_id)
               v_path = await app.download_media(v_msg, file_name="input.mp4", progress=make_prog(app, chat_id, msg_id, "Downloading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
-
-              if thumb_mode == 'original':
-                  try:
-                      subprocess.run(
-                          ['ffmpeg', '-y', '-i', v_path, '-ss', '00:00:01.000', '-vframes', '1', '-q:v', '2', 'thumb_orig.jpg'],
-                          capture_output=True
-                      )
-                      if os.path.exists('thumb_orig.jpg'): thumb_dl_path = 'thumb_orig.jpg'
-                  except Exception: pass
               
               s_path = None
               if s_id:
@@ -437,41 +426,57 @@ jobs:
                               f"Time Elapsed: {format_time(elapsed)}\n"
                               f"Eta: {format_time(eta)}\n"
                               f"Speed: {speed_str}\n"
-                              f"Frame: {format_time(curr_sec)}/{format_time(dur)}\n"
+                                                 f"Frame: {format_time(curr_sec)}/{format_time(dur)}\n"
                               f"Task by: [{user_name}](tg://user?id={user_id})\n"
-                              f"Cancel: /cancel (Reply to this message)\n"
                               f"Specs: {mode.upper()} | {res_val}{hidden_id}"
                           )
-                          try: 
-                              await app.edit_message_text(chat_id, msg_id, text)
+                          try: await app.edit_message_text(chat_id, msg_id, text)
                           except Exception as e:
                               err = str(e).lower()
                               if "deleted" in err or "invalid" in err or "not found" in err:
-                                  proc.kill()
                                   os._exit(1)
-              
+
               await proc.wait()
-              if proc.returncode != 0 or not os.path.exists(out_name):
-                  print(f"FFMPEG CRASHED:\n{error_log}")
-                  if msg_id: 
-                      safe_err = error_log[-500:].replace('`', "'")
-                      try: await app.edit_message_text(chat_id, msg_id, f"❌ **GitHub Encoding Failed!**\n\n**Error Reason:**\n`{safe_err}`{hidden_id}")
+              
+              if proc.returncode != 0:
+                  if msg_id:
+                      try: await app.edit_message_text(chat_id, msg_id, f"❌ **FFmpeg Error**\n`{error_log[-300:]}`{hidden_id}")
                       except: pass
                   await app.stop()
                   return
+              
+              if msg_id:
+                  try: await app.edit_message_text(chat_id, msg_id, f"File name:- **{out_name}**\nUploading... [░░░░░░░░░░] 0.0%\nSpecs: {mode.upper()} | {res_val}{hidden_id}")
+                  except: pass
 
               for attempt in range(3):
                   try:
-                      await app.send_document(chat_id, out_name, caption=f"✅ **{out_name}**", file_name=out_name, thumb=thumb_dl_path if thumb_dl_path and os.path.exists(thumb_dl_path) else None, progress=make_prog(app, chat_id, msg_id, "Uploading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
+                      await app.send_document(
+                          chat_id, out_name,
+                          caption=f"✅ **{out_name}**",
+                          file_name=out_name,
+                          thumb=thumb_path if thumb_path and os.path.exists(thumb_path) else None,
+                          progress=make_prog(app, chat_id, msg_id, "Uploading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None
+                      )
                       break
-                  except Exception:
-                      await asyncio.sleep(5)
-
-              if msg_id: 
+                  except Exception as e:
+                      if attempt == 2:
+                          if msg_id:
+                              try: await app.edit_message_text(chat_id, msg_id, f"❌ Upload failed after 3 tries: {e}{hidden_id}")
+                              except: pass
+                      else:
+                          await asyncio.sleep(10)
+              
+              if msg_id:
                   try: await app.delete_messages(chat_id, msg_id)
                   except: pass
+              
               await app.stop()
 
           asyncio.run(main())
           EOF
-          python worker.py
+          python3 worker.py
+
+      - name: Cleanup
+        if: always()
+        run: rm -f worker.py input.* sub.* sub_mod.* audio.* wm.png thumb.jpg fonts/*.ttf 2>/dev/null || true

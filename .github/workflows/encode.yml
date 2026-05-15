@@ -214,13 +214,19 @@ jobs:
               if wm_file_id and settings.get('wm_type') == 'image':
                   wm_path = await app.download_media(wm_file_id, file_name="wm.png")
               
-              thumb_path = None
-              if thumb_file_id and settings.get('thumb_mode') == 'custom':
-                  thumb_path = await app.download_media(thumb_file_id, file_name="thumb.jpg")
-              
               v_msg = await app.get_messages(chat_id, v_id)
               v_path = await app.download_media(v_msg, file_name="input.mp4", progress=make_prog(app, chat_id, msg_id, "Downloading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None)
               
+              thumb_path = None
+              if thumb_file_id and settings.get('thumb_mode') == 'custom':
+                  thumb_path = await app.download_media(thumb_file_id, file_name="thumb.jpg")
+              elif settings.get('thumb_mode', 'original') == 'original' and v_path:
+                  try:
+                      subprocess.run(['ffmpeg', '-y', '-i', v_path, '-ss', '00:00:02.000', '-vframes', '1', 'thumb.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                      if os.path.exists('thumb.jpg'):
+                          thumb_path = 'thumb.jpg'
+                  except: pass
+                  
               s_path = None
               if s_id:
                   s_msg = await app.get_messages(chat_id, int(s_id))

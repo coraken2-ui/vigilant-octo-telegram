@@ -317,8 +317,8 @@ jobs:
                       vf_chains.append(f"scale={rmap.get(res_val.lower(), res_val)}")
                   
                   if s_path:
-                      esc_sub = s_path.replace("\\", "/").replace("'", r"'''").replace(":", r"\:")
-                      fonts_dir = os.path.abspath("fonts").replace("\\", "/").replace(":", r"\:") if font_file_id else ""
+                      esc_sub = s_path.replace("\\\\", "/").replace("'", r"'\''").replace(":", r"\\:")
+                      fonts_dir = os.path.abspath("fonts").replace("\\\\", "/").replace(":", r"\\:") if font_file_id else ""
                       font_arg = f":fontsdir='{fonts_dir}'" if fonts_dir else ""
                       vf_chains.append(f"subtitles='{esc_sub}'{font_arg}")
 

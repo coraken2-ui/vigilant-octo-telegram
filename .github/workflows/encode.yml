@@ -52,9 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -62,7 +59,7 @@ jobs:
 
       - name: Install Fonts & Python Libs
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq fontconfig
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fontconfig
           pip install -q pyrogram tgcrypto pyaes nest_asyncio
 
       - name: Encode via Pyrogram Worker
@@ -222,7 +219,16 @@ jobs:
                   thumb_path = await app.download_media(thumb_file_id, file_name="thumb.jpg")
               elif settings.get('thumb_mode', 'original') == 'original' and v_path:
                   try:
-                      subprocess.run(['ffmpeg', '-y', '-i', v_path, '-ss', '00:00:02.000', '-vframes', '1', 'thumb.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                      _dur_probe = subprocess.run(
+                          ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                           '-show_entries', 'format=duration', v_path],
+                          capture_output=True, text=True
+                      )
+                      _dur_secs = float(json.loads(_dur_probe.stdout).get('format', {}).get('duration', 0))
+                      _thumb_ts = max(_dur_secs * 0.03, 1.0)  # 3% of duration, min 1s
+                      _h = int(_thumb_ts // 3600); _m = int((_thumb_ts % 3600) // 60); _s = _thumb_ts % 60
+                      _ts_str = f"{_h:02d}:{_m:02d}:{_s:06.3f}"
+                      subprocess.run(['ffmpeg', '-y', '-i', v_path, '-ss', _ts_str, '-vframes', '1', 'thumb.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                       if os.path.exists('thumb.jpg'):
                           thumb_path = 'thumb.jpg'
                   except: pass
@@ -357,9 +363,72 @@ jobs:
                       if vf_chains: cmd += ['-vf', ",".join(vf_chains)]
                   
                   if mode == 'customcmd' and settings.get('custom_args'):
-                      import shlex
-                      cmd += shlex.split(settings['custom_args'])
-                      if '-c:a' not in settings['custom_args']: cmd += ['-c:a', 'copy']
+                      raw_cmd = settings['custom_args'].replace('INPUT', v_path)
+                      is_shell_cmd = '&&' in raw_cmd or raw_cmd.lstrip().startswith('ffmpeg')
+
+                      # Output filename: last token jo '-' se shuru na ho aur extension ho
+                      import shlex as _shlex
+                      _tokens = _shlex.split(raw_cmd) if not ('&&' in raw_cmd) else raw_cmd.split()
+                      _detected_out = None
+                      for _tok in reversed(_tokens):
+                          if not _tok.startswith('-') and '.' in _tok and _tok.split('.')[-1].lower() in ('mkv','mp4','mp3','aac','ass','srt','vtt','mka','m4a','flac','ogg','webm','avi','mov'):
+                              _detected_out = _tok
+                              break
+                      if _detected_out:
+                          out_name = _detected_out
+
+                      if is_shell_cmd:
+                          if msg_id: await app.edit_message_text(chat_id, msg_id, f"File name:- **{out_name}**\nEncoding :- [░░░░░░░░░░] 0.0%\nSpecs: {mode.upper()} | {res_val}{hidden_id}")
+                          print(f"RUNNING SHELL COMMAND: {raw_cmd}")
+                          shell_proc = await asyncio.create_subprocess_shell(
+                              raw_cmd,
+                              stdout=asyncio.subprocess.PIPE,
+                              stderr=asyncio.subprocess.STDOUT
+                          )
+                          _shell_log = ""
+                          while True:
+                              try: _line = await shell_proc.stdout.readuntil(b'\r')
+                              except asyncio.exceptions.IncompleteReadError as _e: _line = _e.partial
+                              if not _line: break
+                              _shell_log += _line.decode(errors='replace')
+                              if len(_shell_log) > 1000: _shell_log = _shell_log[-1000:]
+                          await shell_proc.wait()
+                          if shell_proc.returncode != 0:
+                              if msg_id:
+                                  try: await app.edit_message_text(chat_id, msg_id, f"❌ **Shell Cmd Error**\n`{_shell_log[-300:]}`{hidden_id}")
+                                  except: pass
+                              await app.stop()
+                              return
+                          # Direct upload, skip normal ffmpeg pipeline
+                          if msg_id:
+                              try: await app.edit_message_text(chat_id, msg_id, f"File name:- **{out_name}**\nUploading... [░░░░░░░░░░] 0.0%\nSpecs: {mode.upper()} | {res_val}{hidden_id}")
+                              except: pass
+                          for attempt in range(3):
+                              try:
+                                  await app.send_document(
+                                      chat_id, out_name,
+                                      caption=f"✅ **{out_name}**",
+                                      file_name=out_name,
+                                      thumb=thumb_path if thumb_path and os.path.exists(thumb_path) else None,
+                                      progress=make_prog(app, chat_id, msg_id, "Uploading", out_name, mode, task_id, user_name, user_id, res_val) if msg_id else None
+                                  )
+                                  break
+                              except Exception as _ue:
+                                  if attempt == 2:
+                                      if msg_id:
+                                          try: await app.edit_message_text(chat_id, msg_id, f"❌ Upload failed after 3 tries: {_ue}{hidden_id}")
+                                          except: pass
+                                  else:
+                                      await asyncio.sleep(10)
+                          if msg_id:
+                              try: await app.delete_messages(chat_id, msg_id)
+                              except: pass
+                          await app.stop()
+                          return
+                      else:
+                          # Normal subprocess-safe mode: args list via shlex
+                          c_args = _shlex.split(raw_cmd)
+                          cmd += c_args
                   else:
                       crf = str(settings.get("quality", "23"))
                       preset = settings.get("preset", "fast")
@@ -368,14 +437,16 @@ jobs:
                       if ac == 'copy': cmd += ['-c:a', 'copy']
                       else: cmd += ['-c:a', ac, '-b:a', settings.get('audio_bitrate', '128k')]
 
-              if settings.get('remove_softsubs', False):
-                  cmd += ['-sn']
-              if settings.get('meta_clean', False):
-                  cmd += ['-map_metadata', '-1']
-              if settings.get('meta_title') and str(settings['meta_title']) != 'None':
-                  cmd += ['-metadata', f'title={settings["meta_title"]}']
-              if settings.get('meta_author') and str(settings['meta_author']) != 'None':
-                  cmd += ['-metadata', f'artist={settings["meta_author"]}']
+              # Custom Cmd par forced settings apply nahi karenge taake commands bilkul raw chalein
+              if mode != 'customcmd':
+                  if settings.get('remove_softsubs', False):
+                      cmd += ['-sn']
+                  if settings.get('meta_clean', False):
+                      cmd += ['-map_metadata', '-1']
+                  if settings.get('meta_title') and str(settings['meta_title']) != 'None':
+                      cmd += ['-metadata', f'title={settings["meta_title"]}']
+                  if settings.get('meta_author') and str(settings['meta_author']) != 'None':
+                      cmd += ['-metadata', f'artist={settings["meta_author"]}']
                   
               cmd += [out_name]
               
